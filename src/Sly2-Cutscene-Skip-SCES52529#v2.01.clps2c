@@ -1,0 +1,125 @@
+/*
+  Sly 2: Band of Thieves Cutscene and FMV Skip
+
+  This is a re-implementation in assembly of the cutscene and FMV skipping
+  functionality found within the emulated (PS2HD) release of Sly 2 on PS4/PS5.
+
+  Credit for the skip method belongs entirely to those working for PlayStation
+  on these classic re-releases. Thank you for the work you're doing.
+
+  This is tested for use with PCSX2.
+
+  Push the SELECT button to skip cutscenes and FMVs.
+
+  SCES-52529 v2.01 PAL
+
+  Codecave addresses
+  Start: F12C0
+  End: F13FF
+
+  MIT License: https://github.com/andshrew/Sly2-Cutscene-Skip
+*/
+
+// Skipping the cutscene
+Set SKIP_CUTSCENE_PC 1E4CE0       // Original instruction lwc1 f20,0x80(sp)
+Set SKIP_CUTSCENE_HOOK F12D0
+
+// Checking if the cutscene should be skipped
+Set BEFORE_CUTSCENE_PC 1E249C     // Original instruction lw v0,0x4(a1)
+Set BEFORE_CUTSCENE_HOOK F1310
+
+// After a sequence ends
+Set SEQ_END_PC 20F858             // Original instruction lui a0,0x002E
+Set SEQ_END_HOOK F13A0
+
+// Skipping an FMV
+Set FMV_PC 24C058                 // Original instruction lw v1,0x40(a0)
+Set FMV_PC_HOOK F13D0
+
+// Data locations (memory location reference only)
+Set SKIP_ENABLED 0xF12C0
+Set BUTTON_PRESS 0x02E80B5
+
+ASM_START SKIP_CUTSCENE_PC
+  j SKIP_CUTSCENE_HOOK
+ASM_END 
+
+ASM_START SKIP_CUTSCENE_HOOK
+  // Check the skip cutscene flag is set (0xF12C3 != 0)
+  lw $t3,0xF12C3
+  beql $t3,$zero,Return
+  nop
+  SkipCutscene: lui $v0,0x1 // Set the return value to true, skipping the sequence
+    li $t3,0xF12C3 // Set the skip cutscene flag back to 0
+    sw $zero,($t3)
+  Return: lwc1 $f20,0x80($sp) // Execute the original instruction
+    j SKIP_CUTSCENE_PC + 0x4 // Return to the original execution path
+ASM_END
+
+ASM_START BEFORE_CUTSCENE_PC
+  j BEFORE_CUTSCENE_HOOK
+ASM_END
+
+ASM_START BEFORE_CUTSCENE_HOOK
+  // Sets a flag for SKIP_CUTSCENE_HOOK to indicate if the cutscene should be skipped
+  lw $v0,0x4($a1) // Execute the original instruction
+  // Check the SELECT button is pressed
+  li $t5,0x1 // 0x1 == SELECT (0x8 == START, 0x9 == START + SELECT)
+  lw $t6,0x02E80B5 // 0x02E80B5 == 0x1 on press
+  bne $t5,$t6,Return // Return if SELECT is not pressed
+  nop
+  ButtonIsPressed: lb $t5,0x4($a1) 
+    bne $t5,$zero,Return // Return if $t5 != 0
+    nop
+    // Only skip when the value of ($a1) is one of the following:
+    // 59 (0x3B), 69 (0x45), 82 (0x52)
+    CheckIfShouldSkip: lw $t5,($a1)
+      li $t6,0x45
+      beql $t6,$t5,EnableCutsceneSkip
+      nop
+      li $t6,0x3B
+      beql $t6,$t5,EnableCutsceneSkip
+      nop
+      li $t6,0x52
+      beql $t6,$t5,EnableCutsceneSkip
+      nop
+      b Return
+      nop
+      // All checks have passed, set the skip cutscene flag to 1
+      EnableCutsceneSkip: li $t5,0x1
+        li $t6,0xF12C3
+        sw $t5,($t6)
+  Return: j BEFORE_CUTSCENE_PC + 0x4 // Return to the original execution path
+ASM_END
+
+ASM_START SEQ_END_PC
+  j SEQ_END_HOOK
+ASM_END
+
+ASM_START SEQ_END_HOOK
+  // After the sequence has ended, reset the skip cutscene flag
+  // to zero. This is probably not required as it is reset in
+  // SKIP_CUTSCENE_HOOK
+  li $t5,0xF12C3
+  sw $zero,($t5)
+  lui $a0,0x002E // Execute the original instruction
+  j SEQ_END_PC + 0x4 // Return to the original execution path
+ASM_END
+
+ASM_START FMV_PC
+  j FMV_PC_HOOK
+ASM_END
+
+ASM_START FMV_PC_HOOK
+  // Check the SELECT button is pressed
+  li $t5,0x1 // 0x1 == SELECT (0x8 == START, 0x9 == START + SELECT)
+  lw $t6,0x02E80B5 // 0x02E80B5 == 0x1 on press
+  bne $t5,$t6,Return // Return if SELECT is not pressed
+  nop
+  // Skip the FMV
+  SkipFMV: li $t5,0x1
+    addi $t6,$a0,0x40
+    sb $t5,($t6) // Store lower byte $t5 at memory location held in $t6
+  Return: lw $v1,0x40($a0) // Execute the original instruction
+    j FMV_PC + 0x4 // Return to the original execution path
+ASM_END
